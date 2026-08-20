@@ -1,4 +1,0 @@
-# Ignore API Keys and Secrets
-.env
-__pycache__/
-*.pyc

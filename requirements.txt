@@ -1,0 +1,5 @@
+groq>=0.13.0
+PySide6>=6.7.0
+psutil>=6.0.0
+ddgs>=9.0.0
+python-dotenv>=1.0.0

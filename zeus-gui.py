@@ -1,247 +1,380 @@
-import customtkinter as ctk
+import sys
+
 from groq import Groq
-import threading
-import os
-import datetime
+from PySide6.QtCore import Qt, QObject, QThread, Signal, Slot, QRectF, QTimer
+from PySide6.QtGui import (
+    QColor,
+    QPainter,
+    QPainterPath,
+    QLinearGradient,
+    QPen,
+    QFont,
+    QGuiApplication,
+)
+from PySide6.QtWidgets import (
+    QApplication,
+    QWidget,
+    QVBoxLayout,
+    QHBoxLayout,
+    QLabel,
+    QPushButton,
+    QLineEdit,
+    QScrollArea,
+    QFrame,
+    QSizePolicy,
+    QGraphicsDropShadowEffect,
+)
 
-# --- BRAIN CONFIG ---
-API_KEY = "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"
-MODEL_ID = "openai/gpt-oss-120b"
-ZEUS_PROMPT = "You are ZEUS. Give sharp, formatted answers. Use bullet points and clear headers."
-messages = [{"role": "system", "content": ZEUS_PROMPT}]
-
-client = Groq(api_key=API_KEY) if API_KEY else None
-
-# --- UI COLORS ---
-COLOR_BG = "#0A0A0A"            # Deep Space Black
-COLOR_PANEL = "#121212"         # Chat panel
-COLOR_HEADER = "#111318"        # Header bar
-COLOR_TEXT_USER = "#00D4FF"     # Lightning Blue
-COLOR_TEXT_ZEUS = "#FFD700"     # Electric Gold
-COLOR_TEXT_META = "#5A5A5A"     # Timestamps / dividers
-COLOR_ACCENT = "#1B4F72"        # Power Blue
-COLOR_ACCENT_HOVER = "#24689A"
-COLOR_ONLINE = "#00FF41"
-COLOR_BUSY = "#FFBB00"
-COLOR_ERROR = "#FF4444"
-
-# --- FONT SETTINGS ---
-FONT_BOX = ("Consolas", 14)
-FONT_UI = ("Consolas", 12, "bold")
-FONT_HEADER = ("Consolas", 18, "bold")
-FONT_META = ("Consolas", 10)
-
-ctk.set_appearance_mode("dark")
+from agent import ZeusAgent
+from config import API_KEY
 
 
-class ZeusApp(ctk.CTk):
+def ui_font(size: int = 11, bold: bool = False) -> QFont:
+    font = QFont("Consolas", size)
+    if font.family() != "Consolas":
+        font = QFont("Roboto", size)
+    if bold:
+        font.setBold(True)
+    return font
+
+
+class AgentWorker(QObject):
+    tool_started = Signal(str)
+    finished = Signal(str)
+    failed = Signal(str)
+
+    def __init__(self, agent: ZeusAgent):
+        super().__init__()
+        self.agent = agent
+
+    @Slot(str)
+    def run_turn(self, user_text: str):
+        try:
+            result = self.agent.run_turn(user_text, on_tool=self.tool_started.emit)
+            self.finished.emit(result)
+        except Exception as e:
+            self.failed.emit(str(e))
+
+
+class GlassFrame(QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setAttribute(Qt.WA_TranslucentBackground)
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        rect = QRectF(self.rect()).adjusted(10, 10, -10, -10)
+        radius = 18.0
+        path = QPainterPath()
+        path.addRoundedRect(rect, radius, radius)
+        painter.fillPath(path, QColor(10, 10, 10, 180))
+        grad = QLinearGradient(rect.topLeft(), rect.bottomRight())
+        grad.setColorAt(0.0, QColor(255, 255, 255, int(255 * 0.20)))
+        grad.setColorAt(1.0, QColor(255, 255, 255, int(255 * 0.05)))
+        painter.strokePath(path, QPen(grad, 1.0))
+
+
+class HeaderBar(QWidget):
+    def __init__(self, window: QWidget):
+        super().__init__()
+        self._window = window
+        self._drag_offset = None
+        self.setFixedHeight(44)
+        self.setCursor(Qt.SizeAllCursor)
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self._drag_offset = (
+                event.globalPosition().toPoint() - self._window.frameGeometry().topLeft()
+            )
+            event.accept()
+
+    def mouseMoveEvent(self, event):
+        if self._drag_offset is not None and event.buttons() & Qt.LeftButton:
+            self._window.move(event.globalPosition().toPoint() - self._drag_offset)
+            event.accept()
+
+    def mouseReleaseEvent(self, event):
+        self._drag_offset = None
+        event.accept()
+
+
+class Bubble(QFrame):
+    def __init__(self, text: str, kind: str):
+        super().__init__()
+        self.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Maximum)
+        label = QLabel(text)
+        label.setWordWrap(True)
+        label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        label.setFont(ui_font(11))
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(14, 10, 14, 10)
+        layout.addWidget(label)
+        if kind == "user":
+            self.setStyleSheet("""
+                QFrame {
+                    background: qlineargradient(x1:0,y1:0,x2:1,y2:1,
+                        stop:0 rgba(180, 28, 40, 210),
+                        stop:1 rgba(120, 16, 28, 180));
+                    border: 1px solid rgba(255, 120, 130, 70);
+                    border-radius: 16px;
+                    border-top-right-radius: 4px;
+                }
+                QLabel { color: #FFE8EA; background: transparent; }
+            """)
+        else:
+            self.setStyleSheet("""
+                QFrame {
+                    background: qlineargradient(x1:0,y1:0,x2:1,y2:1,
+                        stop:0 rgba(180, 140, 20, 200),
+                        stop:1 rgba(90, 70, 10, 170));
+                    border: 1px solid rgba(255, 215, 0, 80);
+                    border-radius: 16px;
+                    border-top-left-radius: 4px;
+                }
+                QLabel { color: #FFF4C2; background: transparent; }
+            """)
+
+
+class ChatRow(QWidget):
+    def __init__(self, text: str, kind: str):
+        super().__init__()
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Maximum)
+        self.kind = kind
+        row = QHBoxLayout(self)
+        row.setContentsMargins(4, 4, 4, 4)
+        self.bubble = Bubble(text, kind)
+        if kind == "user":
+            row.addStretch()
+            row.addWidget(self.bubble, 0, Qt.AlignRight)
+        else:
+            row.addWidget(self.bubble, 0, Qt.AlignLeft)
+            row.addStretch()
+
+    def resizeEvent(self, event):
+        cap = max(240, int(self.width() * 0.76))
+        self.bubble.setMaximumWidth(cap)
+        super().resizeEvent(event)
+
+
+class ZeusWindow(QWidget):
+    request_turn = Signal(str)
+
     def __init__(self):
         super().__init__()
+        self.setWindowFlags(Qt.FramelessWindowHint | Qt.Window)
+        self.setAttribute(Qt.WA_TranslucentBackground)
+        self._agent_thread = None
 
-        self.title("ZEUS SYSTEM v1.0")
-        self.geometry("720x820")
-        self.minsize(500, 500)
-        self.configure(fg_color=COLOR_BG)
+        root = QVBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
 
-        self.grid_rowconfigure(1, weight=1)
-        self.grid_columnconfigure(0, weight=1)
+        self.glass = GlassFrame()
+        root.addWidget(self.glass)
 
-        self._thinking_job = None
-        self._pulse_job = None
-        self._thinking_frame = 0
-        self._thinking_states = ["●○○", "○●○", "○○●", "○●○"]
+        shadow = QGraphicsDropShadowEffect(self.glass)
+        shadow.setBlurRadius(32)
+        shadow.setOffset(0, 8)
+        shadow.setColor(QColor(0, 0, 0, 150))
+        self.glass.setGraphicsEffect(shadow)
 
-        # --- HEADER BAR ---
-        self.header = ctk.CTkFrame(self, fg_color=COLOR_HEADER, corner_radius=0, height=64)
-        self.header.grid(row=0, column=0, sticky="ew")
-        self.header.grid_propagate(False)
-        self.header.grid_columnconfigure(0, weight=1)
+        inner = QVBoxLayout(self.glass)
+        inner.setContentsMargins(22, 20, 22, 20)
+        inner.setSpacing(10)
 
-        self.title_label = ctk.CTkLabel(
-            self.header, text="⚡ ZEUS", text_color="#FFFFFF", font=FONT_HEADER
+        header = HeaderBar(self)
+        h = QHBoxLayout(header)
+        h.setContentsMargins(4, 0, 4, 0)
+
+        title = QLabel("ZEUS  ·  Universal Sidekick")
+        title.setStyleSheet("color: rgba(255,255,255,220); background: transparent;")
+        title.setFont(ui_font(14, bold=True))
+
+        self.status = QLabel("● CORE ONLINE")
+        self.status.setStyleSheet("color: #00FF41; background: transparent;")
+        self.status.setFont(ui_font(10))
+
+        chrome = """
+            QPushButton {
+                background: rgba(255,255,255,18);
+                color: rgba(255,255,255,180);
+                border: 1px solid rgba(255,255,255,30);
+                border-radius: 8px;
+            }
+            QPushButton:hover { background: rgba(255,255,255,40); color: white; }
+        """
+        min_btn = QPushButton("–")
+        min_btn.setFixedSize(28, 28)
+        min_btn.setCursor(Qt.PointingHandCursor)
+        min_btn.setStyleSheet(chrome)
+        min_btn.clicked.connect(self.showMinimized)
+
+        close_btn = QPushButton("✕")
+        close_btn.setFixedSize(28, 28)
+        close_btn.setCursor(Qt.PointingHandCursor)
+        close_btn.setStyleSheet(
+            chrome
+            + "QPushButton:hover { background: rgba(200,40,50,180); color: white; }"
         )
-        self.title_label.grid(row=0, column=0, sticky="w", padx=25, pady=15)
+        close_btn.clicked.connect(self.close)
 
-        self.status_label = ctk.CTkLabel(
-            self.header, text="● CORE ONLINE", text_color=COLOR_ONLINE, font=FONT_META
-        )
-        self.status_label.grid(row=0, column=1, sticky="e", padx=25, pady=15)
+        h.addWidget(title)
+        h.addStretch()
+        h.addWidget(self.status)
+        h.addSpacing(8)
+        h.addWidget(min_btn)
+        h.addWidget(close_btn)
 
-        # --- CHAT DISPLAY ---
-        self.chat_display = ctk.CTkTextbox(
-            self,
-            state="disabled",
-            corner_radius=15,
-            border_width=1,
-            border_color="#222222",
-            fg_color=COLOR_PANEL,
-            text_color="#FFFFFF",
-            font=FONT_BOX,
-            padx=20,
-            pady=20,
-        )
-        self.chat_display.grid(row=1, column=0, padx=25, pady=(20, 10), sticky="nsew")
+        self.scroll = QScrollArea()
+        self.scroll.setWidgetResizable(True)
+        self.scroll.setFrameShape(QFrame.NoFrame)
+        self.scroll.setStyleSheet("""
+            QScrollArea { background: transparent; border: none; }
+            QScrollBar:vertical { background: transparent; width: 8px; margin: 4px; }
+            QScrollBar::handle:vertical {
+                background: rgba(255,255,255,40); border-radius: 4px;
+            }
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }
+        """)
+        self.chat_host = QWidget()
+        self.chat_host.setStyleSheet("background: transparent;")
+        self.chat_layout = QVBoxLayout(self.chat_host)
+        self.chat_layout.addStretch()
+        self.scroll.setWidget(self.chat_host)
 
-        self.chat_display.tag_config("user_tag", foreground=COLOR_TEXT_USER)
-        self.chat_display.tag_config("zeus_tag", foreground=COLOR_TEXT_ZEUS)
-        self.chat_display.tag_config("line_tag", foreground="#333333")
-        self.chat_display.tag_config("meta_tag", foreground=COLOR_TEXT_META)
-        self.chat_display.tag_config("error_tag", foreground=COLOR_ERROR)
+        input_bar = QFrame()
+        input_bar.setStyleSheet("""
+            QFrame {
+                background: rgba(255,255,255,12);
+                border: 1px solid rgba(255,255,255,28);
+                border-radius: 16px;
+            }
+        """)
+        ib = QHBoxLayout(input_bar)
+        ib.setContentsMargins(12, 8, 8, 8)
 
-        # --- INPUT AREA ---
-        self.input_frame = ctk.CTkFrame(self, fg_color="transparent")
-        self.input_frame.grid(row=2, column=0, padx=25, pady=(10, 25), sticky="ew")
-        self.input_frame.grid_columnconfigure(0, weight=1)
+        self.entry = QLineEdit()
+        self.entry.setPlaceholderText("Command ZEUS…")
+        self.entry.setFont(ui_font(12))
+        self.entry.setStyleSheet("""
+            QLineEdit {
+                background: transparent; border: none;
+                color: #F2F2F2; selection-background-color: #8B1E2D;
+                padding: 8px;
+            }
+        """)
+        self.entry.returnPressed.connect(self.send_message)
 
-        self.user_input = ctk.CTkEntry(
-            self.input_frame,
-            placeholder_text="Enter command..." if client else "Set GROQ_API_KEY to begin...",
-            height=50,
-            corner_radius=12,
-            fg_color="#1A1A1A",
-            border_color="#333333",
-            font=FONT_BOX,
-        )
-        self.user_input.grid(row=0, column=0, sticky="ew", padx=(0, 10))
-        self.user_input.bind("<Return>", lambda e: self.send_message())
+        self.send = QPushButton("EXE")
+        self.send.setFixedSize(72, 40)
+        self.send.setCursor(Qt.PointingHandCursor)
+        self.send.setFont(ui_font(11, bold=True))
+        self.send.setStyleSheet("""
+            QPushButton {
+                background: qlineargradient(x1:0,y1:0,x2:1,y2:0,
+                    stop:0 #8B1E2D, stop:1 #C9A227);
+                color: white; border: none; border-radius: 12px;
+            }
+            QPushButton:hover { background: #D4AF37; color: #111; }
+            QPushButton:disabled { background: rgba(255,255,255,20); color: #777; }
+        """)
+        self.send.clicked.connect(self.send_message)
+        ib.addWidget(self.entry)
+        ib.addWidget(self.send)
 
-        self.send_button = ctk.CTkButton(
-            self.input_frame,
-            text="EXE ➜",
-            width=90,
-            height=50,
-            corner_radius=12,
-            fg_color=COLOR_ACCENT,
-            hover_color=COLOR_ACCENT_HOVER,
-            font=FONT_UI,
-            command=self.send_message,
-        )
-        self.send_button.grid(row=0, column=1)
+        inner.addWidget(header)
+        inner.addWidget(self.scroll, 1)
+        inner.addWidget(input_bar)
+        self._fit_to_screen()
+        self._setup_worker()
 
-        if not client:
-            self.append_system_error(
-                "GROQ_API_KEY environment variable not found.\n"
-                "Set it in your terminal, then restart ZEUS."
+    def _fit_to_screen(self):
+        screen = self.screen() or QApplication.primaryScreen()
+        geo = screen.availableGeometry()
+        width = min(640, int(geo.width() * 0.46))
+        height = min(700, int(geo.height() * 0.86))
+        width = max(460, width)
+        height = max(500, min(height, geo.height() - 16))
+        self.setMinimumSize(420, 460)
+        self.resize(width, height)
+        frame = self.frameGeometry()
+        frame.moveCenter(geo.center())
+        self.move(frame.topLeft())
+
+    def _setup_worker(self):
+        if not API_KEY:
+            self.set_status("● NO API KEY", "#FF4444")
+            self.entry.setDisabled(True)
+            self.send.setDisabled(True)
+            self.add_bubble(
+                "Set GROQ_API_KEY in a .env file (see .env.example), then restart ZEUS.",
+                "zeus",
             )
-            self.user_input.configure(state="disabled")
-            self.send_button.configure(state="disabled")
-        else:
-            self._start_online_pulse()
-
-        # Optional: drop a zeus_icon.ico next to this script to brand the window/taskbar
-        icon_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "zeus_icon.ico")
-        if os.path.exists(icon_path):
-            try:
-                self.iconbitmap(icon_path)
-            except Exception:
-                pass
-
-    # ---------- helpers ----------
-
-    def _timestamp(self):
-        return datetime.datetime.now().strftime("%H:%M:%S")
-
-    def append_chat(self, sender, text):
-        self.chat_display.configure(state="normal")
-        ts = self._timestamp()
-
-        if sender == "You":
-            self.chat_display.insert("end", f"\n🧑 ── USER · {ts} ──────────────────\n", "line_tag")
-            self.chat_display.insert("end", f"{text}\n", "user_tag")
-            self.chat_display.configure(state="disabled")
-            self.chat_display.see("end")
-        elif sender == "ZEUS":
-            self.chat_display.insert("end", f"\n⚡ ── ZEUS · {ts} ──────────────────\n", "line_tag")
-            self.chat_display.configure(state="disabled")
-            self.chat_display.see("end")
-            self._typewriter_reveal(text)
-
-    def _typewriter_reveal(self, full_text, index=0, chunk_size=2):
-        # Reveals ZEUS's response a few characters at a time for a "live typing" feel
-        self.chat_display.configure(state="normal")
-        end = min(index + chunk_size, len(full_text))
-        self.chat_display.insert("end", full_text[index:end], "zeus_tag")
-        self.chat_display.configure(state="disabled")
-        self.chat_display.see("end")
-
-        if end < len(full_text):
-            self.after(12, lambda: self._typewriter_reveal(full_text, end, chunk_size))
-        else:
-            self.chat_display.configure(state="normal")
-            self.chat_display.insert("end", "\n", "zeus_tag")
-            self.chat_display.configure(state="disabled")
-
-    def append_system_error(self, text):
-        self.chat_display.configure(state="normal")
-        self.chat_display.insert("end", f"\n[SYSTEM] {text}\n", "error_tag")
-        self.chat_display.configure(state="disabled")
-        self.chat_display.see("end")
-
-    def _start_thinking_animation(self):
-        if self._pulse_job is not None:
-            self.after_cancel(self._pulse_job)
-            self._pulse_job = None
-        self._thinking_frame = 0
-        self._animate_thinking()
-
-    def _animate_thinking(self):
-        dots = self._thinking_states[self._thinking_frame % len(self._thinking_states)]
-        self.status_label.configure(text=f"{dots} PROCESSING", text_color=COLOR_BUSY)
-        self._thinking_frame += 1
-        self._thinking_job = self.after(350, self._animate_thinking)
-
-    def _stop_thinking_animation(self):
-        if self._thinking_job is not None:
-            self.after_cancel(self._thinking_job)
-            self._thinking_job = None
-        self._start_online_pulse()
-
-    def _start_online_pulse(self, bright=True):
-        # Idle state gently pulses between full and dim green instead of sitting static
-        color = COLOR_ONLINE if bright else "#0B4D18"
-        self.status_label.configure(text="● CORE ONLINE", text_color=color)
-        if self._thinking_job is None:  # only keep pulsing while not actively "thinking"
-            self._pulse_job = self.after(900, lambda: self._start_online_pulse(not bright))
-
-    # ---------- core actions ----------
-
-    def send_message(self):
-        user_text = self.user_input.get().strip()
-        if not user_text or not client:
             return
 
-        self.append_chat("You", user_text)
-        self.user_input.delete(0, "end")
-        self.send_button.configure(state="disabled", text="...")
-        self._start_thinking_animation()
+        self._agent_thread = QThread(self)
+        self.worker = AgentWorker(ZeusAgent(Groq(api_key=API_KEY)))
+        self.worker.moveToThread(self._agent_thread)
+        self.request_turn.connect(self.worker.run_turn)
+        self.worker.tool_started.connect(self.on_tool)
+        self.worker.finished.connect(self.on_reply)
+        self.worker.failed.connect(self.on_error)
+        self._agent_thread.start()
 
-        thread = threading.Thread(target=self.get_ai_response, args=(user_text,), daemon=True)
-        thread.start()
+    def add_bubble(self, text: str, kind: str):
+        self.chat_layout.insertWidget(self.chat_layout.count() - 1, ChatRow(text, kind))
+        QTimer.singleShot(0, self._scroll_to_bottom)
 
-    def get_ai_response(self, text):
-        global messages
-        messages.append({"role": "user", "content": text})
-        try:
-            completion = client.chat.completions.create(model=MODEL_ID, messages=messages)
-            response = completion.choices[0].message.content
-            messages.append({"role": "assistant", "content": response})
-            self.after(0, self._on_response_success, response)
-        except Exception as e:
-            self.after(0, self._on_response_error, str(e))
+    def _scroll_to_bottom(self):
+        bar = self.scroll.verticalScrollBar()
+        bar.setValue(bar.maximum())
 
-    def _on_response_success(self, response):
-        self.append_chat("ZEUS", response)
-        self._finish_turn()
+    def set_status(self, text: str, color: str):
+        self.status.setText(text)
+        self.status.setStyleSheet(f"color: {color}; background: transparent;")
 
-    def _on_response_error(self, error_text):
-        self.append_system_error(f"REQUEST FAILED: {error_text}")
-        self._finish_turn()
+    def send_message(self):
+        text = self.entry.text().strip()
+        if not text or not self.send.isEnabled() or self._agent_thread is None:
+            return
+        self.entry.clear()
+        self.add_bubble(text, "user")
+        self.send.setDisabled(True)
+        self.set_status("● REASONING", "#FFBB00")
+        self.request_turn.emit(text)
 
-    def _finish_turn(self):
-        self._stop_thinking_animation()
-        self.send_button.configure(state="normal", text="EXE ➜")
+    @Slot(str)
+    def on_tool(self, name: str):
+        self.set_status(f"● TOOL  {name}", "#FFD700")
+
+    @Slot(str)
+    def on_reply(self, text: str):
+        self.add_bubble(text, "zeus")
+        self.set_status("● CORE ONLINE", "#00FF41")
+        self.send.setEnabled(True)
+        self.entry.setFocus()
+
+    @Slot(str)
+    def on_error(self, err: str):
+        self.add_bubble(f"[SYSTEM] {err}", "zeus")
+        self.set_status("● FAULT", "#FF4444")
+        self.send.setEnabled(True)
+        self.entry.setFocus()
+
+    def closeEvent(self, event):
+        if self._agent_thread is not None:
+            self._agent_thread.quit()
+            self._agent_thread.wait(1500)
+        super().closeEvent(event)
 
 
 if __name__ == "__main__":
-    app = ZeusApp()
-    app.mainloop()
+    QGuiApplication.setHighDpiScaleFactorRoundingPolicy(
+        Qt.HighDpiScaleFactorRoundingPolicy.PassThrough
+    )
+    app = QApplication(sys.argv)
+    app.setFont(ui_font(11))
+    window = ZeusWindow()
+    window.show()
+    sys.exit(app.exec())
