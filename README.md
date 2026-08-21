@@ -5,14 +5,14 @@ Zero Effort Universal Sidekick — a local agent with Groq reasoning, tool use, 
 ## Setup
 
 ```powershell
-cd C:\Users\shour\Documents\GitHub\ZEUS
+cd C:\Users\
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
 copy .env.example .env
 ```
 
-Put your Groq key in `.env` as `GROQ_API_KEY`. Never commit that file.
+Put Groq key in `.env`.
 
 If a key was previously hardcoded in this repo, rotate it in the Groq dashboard.
 
