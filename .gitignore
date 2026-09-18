@@ -7,3 +7,6 @@ __pycache__/
 .pytest_cache/
 zeus_history.json
 zeus_memory.json
+models/*.onnx
+models/*.onnx.part
+models/last_view.jpg

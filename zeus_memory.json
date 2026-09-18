@@ -8,6 +8,8 @@
     ],
     "facts": [
         "Building a sidekick",
-        "I am 15 years old"
+        "I am 15 years old",
+        "User is 15 years old"
+    
     ]
 }

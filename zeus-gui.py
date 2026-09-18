@@ -10,6 +10,7 @@ from PySide6.QtGui import (
     QPen,
     QFont,
     QGuiApplication,
+    QPixmap,
 )
 from PySide6.QtWidgets import (
     QApplication,
@@ -27,6 +28,7 @@ from PySide6.QtWidgets import (
 
 from agent import ZeusAgent
 from config import API_KEY
+from tools.vision_tools import consume_preview, see_screen, see_webcam
 
 
 def ui_font(size: int = 11, bold: bool = False) -> QFont:
@@ -40,6 +42,7 @@ def ui_font(size: int = 11, bold: bool = False) -> QFont:
 
 class AgentWorker(QObject):
     tool_started = Signal(str)
+    preview_ready = Signal(str)
     finished = Signal(str)
     failed = Signal(str)
 
@@ -47,10 +50,28 @@ class AgentWorker(QObject):
         super().__init__()
         self.agent = agent
 
+    def _emit_preview(self):
+        path = consume_preview()
+        if path:
+            self.preview_ready.emit(path)
+
     @Slot(str)
     def run_turn(self, user_text: str):
         try:
             result = self.agent.run_turn(user_text, on_tool=self.tool_started.emit)
+            self._emit_preview()
+            self.finished.emit(result)
+        except Exception as e:
+            self.failed.emit(str(e))
+
+    @Slot(str)
+    def run_capture(self, kind: str):
+        try:
+            if kind == "WEBCAM":
+                result = see_webcam()
+            else:
+                result = see_screen()
+            self._emit_preview()
             self.finished.emit(result)
         except Exception as e:
             self.failed.emit(str(e))
@@ -101,16 +122,30 @@ class HeaderBar(QWidget):
 
 
 class Bubble(QFrame):
-    def __init__(self, text: str, kind: str):
+    def __init__(self, text: str, kind: str, image_path: str | None = None):
         super().__init__()
         self.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Maximum)
-        label = QLabel(text)
-        label.setWordWrap(True)
-        label.setTextInteractionFlags(Qt.TextSelectableByMouse)
-        label.setFont(ui_font(11))
         layout = QVBoxLayout(self)
         layout.setContentsMargins(14, 10, 14, 10)
-        layout.addWidget(label)
+        layout.setSpacing(8)
+        if image_path:
+            pix = QPixmap(image_path)
+            if not pix.isNull():
+                img = QLabel()
+                img.setPixmap(
+                    pix.scaled(
+                        420, 260, Qt.KeepAspectRatio, Qt.SmoothTransformation
+                    )
+                )
+                img.setAlignment(Qt.AlignCenter)
+                img.setStyleSheet("background: transparent;")
+                layout.addWidget(img)
+        if text:
+            label = QLabel(text)
+            label.setWordWrap(True)
+            label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+            label.setFont(ui_font(11))
+            layout.addWidget(label)
         if kind == "user":
             self.setStyleSheet("""
                 QFrame {
@@ -138,13 +173,13 @@ class Bubble(QFrame):
 
 
 class ChatRow(QWidget):
-    def __init__(self, text: str, kind: str):
+    def __init__(self, text: str, kind: str, image_path: str | None = None):
         super().__init__()
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Maximum)
         self.kind = kind
         row = QHBoxLayout(self)
         row.setContentsMargins(4, 4, 4, 4)
-        self.bubble = Bubble(text, kind)
+        self.bubble = Bubble(text, kind, image_path)
         if kind == "user":
             row.addStretch()
             row.addWidget(self.bubble, 0, Qt.AlignRight)
@@ -160,12 +195,15 @@ class ChatRow(QWidget):
 
 class ZeusWindow(QWidget):
     request_turn = Signal(str)
+    request_capture = Signal(str)
 
     def __init__(self):
         super().__init__()
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.Window)
         self.setAttribute(Qt.WA_TranslucentBackground)
         self._agent_thread = None
+        self._pending_preview = None
+        self._hidden_for_capture = False
 
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
@@ -219,10 +257,26 @@ class ZeusWindow(QWidget):
         )
         close_btn.clicked.connect(self.close)
 
+        see_btn = QPushButton("SEE")
+        see_btn.setFixedSize(44, 28)
+        see_btn.setCursor(Qt.PointingHandCursor)
+        see_btn.setStyleSheet(chrome)
+        see_btn.setToolTip("Look at the screen")
+        see_btn.clicked.connect(self.capture_screen)
+
+        cam_btn = QPushButton("CAM")
+        cam_btn.setFixedSize(44, 28)
+        cam_btn.setCursor(Qt.PointingHandCursor)
+        cam_btn.setStyleSheet(chrome)
+        cam_btn.setToolTip("Look through the webcam")
+        cam_btn.clicked.connect(self.capture_webcam)
+
         h.addWidget(title)
         h.addStretch()
         h.addWidget(self.status)
         h.addSpacing(8)
+        h.addWidget(see_btn)
+        h.addWidget(cam_btn)
         h.addWidget(min_btn)
         h.addWidget(close_btn)
 
@@ -317,13 +371,17 @@ class ZeusWindow(QWidget):
         self.worker = AgentWorker(ZeusAgent(Groq(api_key=API_KEY)))
         self.worker.moveToThread(self._agent_thread)
         self.request_turn.connect(self.worker.run_turn)
+        self.request_capture.connect(self.worker.run_capture)
         self.worker.tool_started.connect(self.on_tool)
+        self.worker.preview_ready.connect(self.on_preview)
         self.worker.finished.connect(self.on_reply)
         self.worker.failed.connect(self.on_error)
         self._agent_thread.start()
 
-    def add_bubble(self, text: str, kind: str):
-        self.chat_layout.insertWidget(self.chat_layout.count() - 1, ChatRow(text, kind))
+    def add_bubble(self, text: str, kind: str, image_path: str | None = None):
+        self.chat_layout.insertWidget(
+            self.chat_layout.count() - 1, ChatRow(text, kind, image_path)
+        )
         QTimer.singleShot(0, self._scroll_to_bottom)
 
     def _scroll_to_bottom(self):
@@ -344,19 +402,42 @@ class ZeusWindow(QWidget):
         self.set_status("● REASONING", "#FFBB00")
         self.request_turn.emit(text)
 
+    def _capture(self, kind: str):
+        if self._agent_thread is None:
+            return
+        self._pending_preview = None
+        self.set_status(f"● {kind}", "#FFD700")
+        self.send.setDisabled(True)
+        self.hide()
+        QTimer.singleShot(250, lambda: self.request_capture.emit(kind))
+
+    def capture_screen(self):
+        self._capture("SCREEN")
+
+    def capture_webcam(self):
+        self._capture("WEBCAM")
+
+    @Slot(str)
+    def on_preview(self, image_path: str):
+        self._pending_preview = image_path
+
     @Slot(str)
     def on_tool(self, name: str):
         self.set_status(f"● TOOL  {name}", "#FFD700")
 
     @Slot(str)
     def on_reply(self, text: str):
-        self.add_bubble(text, "zeus")
+        self.show()
+        self.add_bubble(text, "zeus", self._pending_preview)
+        self._pending_preview = None
         self.set_status("● CORE ONLINE", "#00FF41")
         self.send.setEnabled(True)
         self.entry.setFocus()
 
     @Slot(str)
     def on_error(self, err: str):
+        self.show()
+        self._pending_preview = None
         self.add_bubble(f"[SYSTEM] {err}", "zeus")
         self.set_status("● FAULT", "#FF4444")
         self.send.setEnabled(True)

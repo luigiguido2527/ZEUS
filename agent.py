@@ -22,12 +22,16 @@ User: {memory.get("user_name", "User")} | Context: {facts}
 - [[LIST_FILES: path]]
 - [[READ_FILE: path]]
 - [[SEARCH_WEB: query]]
+- [[SEE_SCREEN]]
+- [[SEE_WEBCAM]] or [[SEE_WEBCAM: 0]]
+- [[IDENTIFY_IMAGE: path]]
 
 [CRITICAL INSTRUCTIONS]
 1. If you need information, output the tool tag ONLY. Example: [[SEARCH_WEB: news today]]
 2. NEVER say "Awaiting observation" or "Waiting for system". Just output the tag.
 3. Once you get the Observation, provide your final response to the user.
 4. To remember something durable, include [SAVE_FACT: short fact] in a normal reply.
+5. If the user asks you to look, see, watch the screen/camera, or identify an image, use SEE_SCREEN, SEE_WEBCAM, or IDENTIFY_IMAGE.
 """
 
 

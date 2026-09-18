@@ -18,7 +18,13 @@ except ImportError:
             os.environ.setdefault(key.strip(), value.strip().strip('"').strip("'"))
 
 MODEL_ID = os.getenv("ZEUS_MODEL", "openai/gpt-oss-120b")
+VISION_MODEL = os.getenv("ZEUS_VISION_MODEL", "qwen/qwen3.6-27b")
 API_KEY = os.getenv("GROQ_API_KEY", "").strip()
 MEMORY_PATH = ROOT / "zeus_memory.json"
 HISTORY_PATH = ROOT / "zeus_history.json"
 HISTORY_LIMIT = 20
+MODELS_DIR = ROOT / "models"
+YOLO_ONNX_URL = os.getenv(
+    "ZEUS_YOLO_URL",
+    "https://huggingface.co/Kalray/yolov8/resolve/main/yolov8n.onnx",
+)
