@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#08101d"><title>ZEUS / Command Center</title><link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar">
+    <div class="brand"><div class="brand-mark">Z</div><div><b>ZEUS</b><small>LOCAL COMMAND CENTER</small></div></div>
+    <nav aria-label="Main navigation">
+      <button class="nav-item active" data-view="chat"><span>◈</span> Command deck</button>
+      <button class="nav-item" data-view="history"><span>◷</span> Conversation history</button>
+      <button class="nav-item" data-view="system"><span>⌁</span> System telemetry</button>
+      <button class="nav-item" data-view="settings"><span>⚙</span> Settings</button>
+    </nav>
+    <div class="sidebar-foot"><div class="local-badge"><i></i><span><b>LOCAL ONLY</b><small>No cloud UI relay</small></span></div><button id="collapse" class="icon-btn" aria-label="Collapse navigation">≡</button></div>
+  </aside>
+  <main class="main">
+    <header class="topbar"><button id="mobile-menu" class="icon-btn">☰</button><div><span class="kicker">MISSION CONTROL / <span id="view-title">COMMAND DECK</span></span><h1 id="headline">Good morning, operator.</h1></div><div class="top-actions"><span class="connection"><i id="status-dot"></i><span id="status">CONNECTING</span></span><button id="refresh" class="icon-btn" aria-label="Refresh">↻</button></div></header>
+    <div id="toast" class="toast" role="status"></div>
+    <section id="view-chat" class="view active">
+      <div class="stats-row"><div class="stat-card"><span>AGENT STATUS</span><strong id="agent-status">READY</strong><small id="agent-sub">Waiting for your next instruction</small></div><div class="stat-card"><span>LAST ACTION</span><strong id="last-action">NONE</strong><small>Tool activity from this session</small></div><div class="stat-card accent"><span>RUNTIME</span><strong id="runtime">LOCAL</strong><small>Python bridge on this device</small></div></div>
+      <div class="chat-layout"><section class="chat-card"><div class="card-head"><div><span class="kicker">SECURE CHANNEL</span><h2>Talk to ZEUS</h2></div><span class="live-pill"><i></i> LIVE</span></div><div id="messages" class="messages"><div id="empty-chat" class="empty-state"><div class="empty-orb">✦</div><h3>What will we solve?</h3><p>Ask ZEUS to research, inspect files, check your system, or help think through a problem.</p><div class="suggestions"><button data-prompt="What is the current system status?">System status</button><button data-prompt="What can you help me with?">Capabilities</button><button data-prompt="Get the current time">Current time</button></div></div></div><div id="tool-strip" class="tool-strip hidden"></div><form id="composer"><div class="compose-tools"><label class="attach" title="Attach a document">＋<input id="file-input" type="file" accept=".txt,.md,.docx,.pdf,.xlsx,.xlsm,.pptx"></label><button type="button" id="camera-toggle" class="tool-button" title="Use camera">◉</button><button type="button" id="mic-toggle" class="tool-button" title="Use microphone">♩</button></div><textarea id="message" rows="1" placeholder="Ask ZEUS anything…" aria-label="Message ZEUS"></textarea><button id="send" class="send-btn" type="submit">SEND <span>↵</span></button></form><div id="attachment" class="attachment hidden"></div><p id="error" class="error" role="alert"></p></section><aside class="right-rail"><section class="rail-card"><div class="card-head compact"><h3>Activity pulse</h3><button class="text-btn" data-view-target="system">View all</button></div><div id="activity-list" class="activity-list"><div class="loading-line"></div><div class="loading-line short"></div></div></section><section class="rail-card camera-card"><div class="card-head compact"><h3>Vision input</h3><span id="camera-state" class="muted">OFF</span></div><video id="camera" autoplay muted playsinline></video><div class="camera-actions"><button id="camera-start" class="secondary-btn">Enable camera</button><button id="camera-stop" class="secondary-btn hidden">Stop</button></div><p class="muted">Browser permission required. Frames stay in this tab.</p></section></aside></div>
+    </section>
+    <section id="view-history" class="view"><div class="page-card"><div class="page-heading"><div><span class="kicker">MEMORY BANK</span><h2>Conversation history</h2></div><button id="history-refresh" class="secondary-btn">Refresh</button></div><div id="history-list" class="history-list"><div class="loading-block">Loading saved context…</div></div></div></section>
+    <section id="view-system" class="view"><div class="telemetry-grid"><div class="telemetry-card"><span>CPU LOAD</span><strong id="cpu">—</strong><div class="meter"><i id="cpu-bar"></i></div></div><div class="telemetry-card"><span>MEMORY</span><strong id="memory">—</strong><div class="meter"><i id="memory-bar"></i></div></div><div class="telemetry-card"><span>DISK</span><strong id="disk">—</strong><div class="meter"><i id="disk-bar"></i></div></div></div><div class="page-card"><div class="page-heading"><div><span class="kicker">EVENT STREAM</span><h2>Tool activity</h2></div><span class="muted" id="os-label">—</span></div><div id="system-activity" class="activity-list"></div></div></section>
+    <section id="view-settings" class="view"><div class="page-card settings-page"><span class="kicker">CONFIGURATION</span><h2>Bridge settings</h2><p class="muted">Read-only runtime details for this local ZEUS instance.</p><div id="settings-list" class="settings-list"><div class="loading-block">Loading settings…</div></div><div class="notice"><b>Privacy boundary</b><p>Requests stay on 127.0.0.1 and are passed to the same Python agent used by the desktop UI. Camera and microphone streams are never uploaded by the bridge.</p></div></div></section>
+  </main>
+</div>
+<script src="/app.js"></script>
+</body></html>

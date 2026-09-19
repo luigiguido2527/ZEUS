@@ -2,6 +2,8 @@
 .venv/
 venv/
 __pycache__/
+.pytest_cache/
+web_uploads/
 *.py[cod]
 *.egg-info/
 .pytest_cache/
